@@ -174,8 +174,12 @@ If you use this code or method in your research, please cite:
   year   = {2026},
   url    = {https://github.com/joshi-006/vessel-segmentation-patch-correction}
 }
+```
 
-🔮 Future Work
+---
+
+
+## 🔮 Future Work
 
 Generalization to other medical segmentation tasks (OCT, MRI, etc.)
 Integration of advanced uncertainty methods (evidential learning, Bayesian neural networks)
@@ -183,7 +187,7 @@ Optimization for faster inference
 Plug-and-play quality control module for clinical pipelines
 
 
-👥 Authors
+## 👥 Authors
 
 N.Joshitha
 K.Vamsika
