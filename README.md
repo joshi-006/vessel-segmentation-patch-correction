@@ -1,115 +1,129 @@
 # Vessel Segmentation with Uncertainty-Guided Patch Correction
 
-## 📌 Overview
+## 🚀 Overview
 
 This project enhances retinal vessel segmentation by introducing a **post-processing patch correction framework** on top of a trained segmentation model.
 
-Rather than modifying the base model, the method focuses on **refining uncertain regions** using uncertainty estimation and a safety-driven update mechanism.
+Rather than modifying the base model, the method focuses on **refining uncertain regions** using epistemic uncertainty estimation and a **safety-driven update mechanism**. 
+
+The pipeline identifies uncertain patches via Mutual Information (MI), corrects them with a dedicated Attention U-Net, and applies corrections only when they improve local model confidence — preventing degradation of already correct areas.
+
+---
+
+## 🎯 Key Features
+
+- Ensemble of 5 FR-UNet models with MC Dropout for robust uncertainty estimation
+- Mutual Information (MI) based patch selection targeting epistemically uncertain regions
+- Patch-level refinement using Attention U-Net
+- **Safe Update Rule**: Accept correction only if mean confidence strictly improves
+- Significant improvement in hard and uncertain regions with minimal risk of degradation
+- Modular and reproducible codebase
 
 ---
 
 ## 🧠 Method
 
-### 🔹 Base Model
+### Base Model
+- **FR-UNet** (Full Resolution U-Net) ensemble of 5 models trained with different random seeds on the FIVES dataset
+- MC Dropout enabled during inference (dropout rate = 0.3)
 
-* FR-UNet ensemble trained on the FIVES dataset
+### Uncertainty Estimation
+- Multiple stochastic forward passes (N=30) combining MC Dropout and Test-Time Augmentation
+- Computation of **Mutual Information (MI)** to quantify epistemic uncertainty
+- High MI regions indicate where the model is most uncertain and likely to make errors
 
-### 🔹 Pipeline
+### Patch Correction Pipeline
+1. Extract top-K patches with highest MI scores (default: K=16, patch size=81×81)
+2. Refine selected patches using a dedicated Attention U-Net correction model
+3. **Safe Update Rule**: Apply corrected patch only if `new_confidence > old_confidence + margin`
+4. Support for 1–2 iterative correction passes with adaptive stopping
 
-1. **MC Dropout** generates multiple stochastic predictions
-2. **Mutual Information (MI)** identifies uncertain regions
-3. **Patch Extraction** selects high-uncertainty areas
-4. **Patch Correction Model (Attention U-Net)** refines predictions
-5. **Safe Update Rule** applies corrections only when confidence improves and uncertainty decreases
-
-> ⚠️ Dice score is used **only for evaluation** and is not involved in any correction decision.
-
----
-
-## 🚀 Key Idea
-
-> Instead of correcting all regions, the method selectively refines only uncertain patches, while a guarded update mechanism prevents degradation of already correct predictions.
+> Note: Dice score is used **only for evaluation**, never for guiding corrections.
 
 ---
 
 ## 📊 Results
 
-| Metric      | Value |
-| ----------- | ----: |
-| Dice Score  | ~0.86 |
-| IoU         | ~0.76 |
-| Improvement | +0.02 |
+Evaluated on the **test set** of the FIVES dataset.
 
-### 📈 Additional Insights
+| Metric                        | Baseline          | Ours              | Improvement          |
+|-------------------------------|-------------------|-------------------|----------------------|
+| Global Dice Score             | ~0.84             | **~0.86**         | **+0.02**            |
+| IoU                           | ~0.74             | **~0.76**         | +0.02                |
+| Images Improved               | -                 | **~97%**          | -                    |
+| Patch-level Dice Gain         | -                 | **> +0.07**       | Strong targeted gain |
+| High-MI / Hard Region Dice    | Lower             | **Significant**   | Clear improvement    |
 
-* ~97% of images show improvement
-* Minimal degradation (~3%)
-* Strong gains in challenging regions
-* Patch-level Dice improvement > 0.07
+The method improves segmentation quality in **97% of test images** while rarely degrading performance, thanks to the safe update mechanism.
 
 ---
 
 ## 📁 Project Structure
 
-```id="l5lzvb"
-project/
+```bash
+vessel-segmentation-patch-correction/
+├── main.py                     # End-to-end inference pipeline
+├── requirements.txt
+├── README.md
 │
-├── main.py
-│   └── End-to-end pipeline orchestration
-│
-├── training/
-│   └── FR-UNet training and optimization
-│
-├── models/
-│   └── Model architectures and loading utilities
-│
-├── correction/
-│   └── Patch-level correction module (core contribution)
-│
-├── evaluation/
-│   └── Metrics computation and performance analysis
-│
-├── utils/
-│   └── Helper functions and shared utilities
-│
-└── notebooks/
-    └── Demo notebook for visualization and experiments
+├── training/                   # Scripts and configs for training FR-UNet ensemble
+├── models/                     # FR-UNet and Attention U-Net model definitions
+├── model_weights/              # Pretrained FR-UNet ensemble (5 models)
+├── correction/                 # Uncertainty estimation + patch selection + safe correction
+├── evaluation/                 # Metrics calculation and qualitative visualization
+├── utils/                      # Dataset, preprocessing, and helper functions
+├── notebooks/                  # Demo and visualization notebooks
+└── results/                    # Generated qualitative results (MI maps, before/after, error maps)
+
+```markdown
+## 🛠️ Setup & Installation
+
+### 1. Clone the Repository
+```bash
+git clone https://github.com/joshi-006/vessel-segmentation-patch-correction.git
+cd vessel-segmentation-patch-correction
 ```
 
----
-
-## ▶️ How to Run
-
-### 1. Install Dependencies
-
-```id="n1"
+### 2. Install Dependencies
+```bash
 pip install -r requirements.txt
 ```
 
-### 2. Download Dataset
+### 3. Download the FIVES Dataset
 
-FIVES Dataset (Kaggle):
-https://www.kaggle.com/datasets/nikitamanaenkov/fundus-image-dataset-for-vessel-segmentation
+1. Download the dataset from Kaggle:  
+   [Fundus Image Dataset for Vessel Segmentation (FIVES)](https://www.kaggle.com/datasets/nikitamanaenkov/fundus-image-dataset-for-vessel-segmentation)
 
-Place it in:
-
-```id="n2"
-data/
-└── fundus-image-dataset-for-vessel-segmentation/
+2. Extract it and place the folder at the following location:
+```bash
+./data/fundus-image-dataset-for-vessel-segmentation/
 ```
 
----
+   Final expected structure:
+```bash
+data/
+└── fundus-image-dataset-for-vessel-segmentation/
+    ├── train/
+    │   ├── Original/
+    │   └── Ground truth/
+    └── test/
+        ├── Original/
+        └── Ground truth/
+```
 
-### 3. Download Model Weights
+### 4. Download Pretrained Model Weights
 
-Pretrained FR-UNet ensemble weights are provided separately:
+1. Download the 5 FR-UNet ensemble models from Google Drive:  
+   [📥 Download Model Weights](https://drive.google.com/file/d/1HT6GWupH946phBKnBLplz5KhaKGiAr_B/view?usp=sharing)
 
-https://drive.google.com/file/d/1HT6GWupH946phBKnBLplz5KhaKGiAr_B/view?usp=sharing
+2. Create the folder and place the files:
+```bash
+mkdir -p model_weights
+```
 
-Place them in:
-
-```id="o5p4sp"
-models_weights/
+3. Place all downloaded `.pth` files inside `model_weights/`:
+```bash
+model_weights/
 ├── FRUNet_MC_0.pth
 ├── FRUNet_MC_1.pth
 ├── FRUNet_MC_2.pth
@@ -117,44 +131,59 @@ models_weights/
 └── FRUNet_MC_4.pth
 ```
 
-These correspond to multiple trained models used for uncertainty estimation and correction.
-
----
-
-### 4. Run the Pipeline
-
-```id="n3"
+### 5. Run the Pipeline
+```bash
 python main.py
 ```
 
 ---
 
-## 🎯 Contributions
+## ⚙️ Hyperparameters (Tuned on Validation Set)
 
-* Uncertainty-guided patch selection using Mutual Information
-* Safe update mechanism to prevent performance degradation
-* Improved segmentation in challenging regions
-* Modular and reproducible pipeline
+| Parameter                | Value   | Description                              |
+|--------------------------|---------|------------------------------------------|
+| Patch Size               | 81×81   | Size of extracted patches                |
+| Top-K Patches            | 16      | Number of uncertain patches per image    |
+| MC Dropout Passes        | 30      | For stable Mutual Information estimation |
+| Safe Update Margin       | 0.015   | Minimum confidence improvement required  |
+| Correction Passes        | 2       | Aggressive pass + gated refinement pass  |
 
----
-
-## ⚠️ Notes
-
-* Dataset is not included in this repository
-* Model weights are provided separately
-* Results may vary slightly due to stochasticity in MC Dropout
+All hyperparameters were selected **exclusively on the validation split** (15% of training data).
 
 ---
 
-## 📌 Future Work
+## 📸 Qualitative Results
 
-* Improved uncertainty estimation techniques
-* Extension to other medical segmentation tasks
-* Optimization for faster inference
+After running the pipeline, the `results/` folder will contain:
+- Original vs Ground Truth vs Before vs After comparisons
+- Mutual Information uncertainty heatmaps
+- False Positive (red) and False Negative (blue) error maps
+
+These visualizations demonstrate effective correction of uncertain vessel boundaries and low-contrast regions.
 
 ---
 
-## 👩‍💻 Authors
+## 📚 Citation
 
-* Joshitha
-* Vamsika
+If you use this code or method in your research, please cite:
+
+```bibtex
+@misc{joshi2026vesselpatchcorrection,
+  author = {Joshitha Namakam and Vamsika},
+  title  = {Vessel Segmentation with Uncertainty-Guided Patch Correction},
+  year   = {2026},
+  url    = {https://github.com/joshi-006/vessel-segmentation-patch-correction}
+}
+
+🔮 Future Work
+
+Generalization to other medical segmentation tasks (OCT, MRI, etc.)
+Integration of advanced uncertainty methods (evidential learning, Bayesian neural networks)
+Optimization for faster inference
+Plug-and-play quality control module for clinical pipelines
+
+
+👥 Authors
+
+N.Joshitha
+K.Vamsika
