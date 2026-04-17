@@ -192,3 +192,5 @@ Plug-and-play quality control module for clinical pipelines
 
 N.Joshitha
 K.Vamsika
+
+Feel free to open issues or contact us for collaboration!
