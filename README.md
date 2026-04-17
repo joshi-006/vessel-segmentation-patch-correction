@@ -45,18 +45,33 @@ Improvement| +0.02
 - 🎯 Patch-level Dice improvement > 0.07
 
 ---
+📁 Project Structure
 
-🗂 Project Structure
-
+```
 project/
 │
-├── main.py                  # Full pipeline (end-to-end)
-├── training/                # FR-UNet training
-├── correction/              # Patch correction logic (core method)
-├── evaluation/              # Metrics and analysis
-├── models/                  # Model architectures and loaders
-├── utils/                   # Helper functions
-├── notebooks/               # Demo notebook
+├── main.py
+│   └── End-to-end pipeline orchestration
+│
+├── training/
+│   └── FR-UNet training and optimization
+│
+├── models/
+│   └── Model architectures and loading utilities
+│
+├── correction/
+│   └── Patch-level correction module (core contribution)
+│
+├── evaluation/
+│   └── Metrics computation and performance analysis
+│
+├── utils/
+│   └── Helper functions and shared utilities
+│
+└── notebooks/
+    └── Demo notebook for visualization and experiments
+```
+
 
 ---
 
