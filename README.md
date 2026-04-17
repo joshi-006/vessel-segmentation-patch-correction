@@ -1,53 +1,57 @@
-Vessel Segmentation with Uncertainty-Guided Patch Correction
+# Vessel Segmentation with Uncertainty-Guided Patch Correction
 
-📌 Overview
+## 📌 Overview
 
-This project improves retinal vessel segmentation by applying a post-processing patch correction pipeline on top of a trained segmentation model.
+This project enhances retinal vessel segmentation by introducing a **post-processing patch correction framework** on top of a trained segmentation model.
 
-Instead of modifying the segmentation model itself, the method focuses on correcting uncertain regions using uncertainty estimation and a safety-based update rule.
-
----
-
-🧠 Method
-
-🔹 Base Model
-
-- FR-UNet ensemble (trained on FIVES dataset)
-
-🔹 Key Components
-
-- MC Dropout → generates multiple predictions
-- Mutual Information (MI) → identifies uncertain regions
-- Patch Extraction → selects high-uncertainty patches
-- Patch Correction Model (Attention U-Net)
-- Safe Update Rule → applies correction only if it improves confidence and reduces uncertainty
+Rather than modifying the base model, the method focuses on **refining uncertain regions** using uncertainty estimation and a safety-driven update mechanism.
 
 ---
 
-🚀 Key Idea
+## 🧠 Method
 
-«Instead of correcting all regions, we selectively correct only uncertain patches, and apply a guarded update mechanism to avoid degrading already correct predictions.»
+### 🔹 Base Model
+
+* FR-UNet ensemble trained on the FIVES dataset
+
+### 🔹 Pipeline
+
+1. **MC Dropout** generates multiple stochastic predictions
+2. **Mutual Information (MI)** identifies uncertain regions
+3. **Patch Extraction** selects high-uncertainty areas
+4. **Patch Correction Model (Attention U-Net)** refines predictions
+5. **Safe Update Rule** applies corrections only when confidence improves and uncertainty decreases
+
+> ⚠️ Dice score is used **only for evaluation** and is not involved in any correction decision.
+
+---
+
+## 🚀 Key Idea
+
+> Instead of correcting all regions, the method selectively refines only uncertain patches, while a guarded update mechanism prevents degradation of already correct predictions.
 
 ---
 
-📊 Results
+## 📊 Results
 
-Metric| Value
-Dice Score| ~0.86
-IoU| ~0.76
-Improvement| +0.02
+| Metric      | Value |
+| ----------- | ----: |
+| Dice Score  | ~0.86 |
+| IoU         | ~0.76 |
+| Improvement | +0.02 |
 
-📈 Additional Insights
+### 📈 Additional Insights
 
-- ✅ ~97% images improved
-- ⚠️ Minimal degradation (~3%)
-- 🔥 Strong improvement in difficult regions
-- 🎯 Patch-level Dice improvement > 0.07
+* ~97% of images show improvement
+* Minimal degradation (~3%)
+* Strong gains in challenging regions
+* Patch-level Dice improvement > 0.07
 
 ---
-📁 Project Structure
 
-```
+## 📁 Project Structure
+
+```id="l5lzvb"
 project/
 │
 ├── main.py
@@ -72,35 +76,37 @@ project/
     └── Demo notebook for visualization and experiments
 ```
 
-
 ---
 
-▶️ How to Run
+## ▶️ How to Run
 
-1. Install dependencies
+### 1. Install Dependencies
 
+```id="n1"
 pip install -r requirements.txt
+```
 
-2. Download Dataset
+### 2. Download Dataset
 
-This project uses the FIVES dataset from Kaggle:
+FIVES Dataset (Kaggle):
+https://www.kaggle.com/datasets/nikitamanaenkov/fundus-image-dataset-for-vessel-segmentation
 
-👉 https://www.kaggle.com/datasets/nikitamanaenkov/fundus-image-dataset-for-vessel-segmentation
+Place it in:
 
-After downloading, place it in:
-
+```id="n2"
 data/
 └── fundus-image-dataset-for-vessel-segmentation/
+```
 
 ---
 
-3. Download Model Weights
+### 3. Download Model Weights
 
-Pretrained FR-UNet ensemble weights are not included due to size constraints.
+Pretrained FR-UNet ensemble weights are provided separately:
 
-👉 "Download Weights" (https://drive.google.com/file/d/1HT6GWupH946phBKnBLplz5KhaKGiAr_B/view?usp=sharing)
+https://drive.google.com/file/d/1HT6GWupH946phBKnBLplz5KhaKGiAr_B/view?usp=sharing
 
-After downloading, place the pretrained weights in the following directory:
+Place them in:
 
 ```id="o5p4sp"
 models_weights/
@@ -111,45 +117,44 @@ models_weights/
 └── FRUNet_MC_4.pth
 ```
 
-These files correspond to multiple trained instances of the FR-UNet model used for inference and patch-level correction.
-
+These correspond to multiple trained models used for uncertainty estimation and correction.
 
 ---
 
-4. Run Pipeline
+### 4. Run the Pipeline
 
+```id="n3"
 python main.py
+```
 
 ---
 
-🎯 Contribution
+## 🎯 Contributions
 
-- Uncertainty-guided patch selection using Mutual Information
-- Safe update mechanism to prevent degradation
-- Significant improvement in hard regions
-- Modular and reproducible pipeline
-
----
-
-⚠️ Notes
-
-- Dataset is not included in this repository
-- Model weights are provided separately
-- Results may vary slightly due to randomness in MC Dropout
+* Uncertainty-guided patch selection using Mutual Information
+* Safe update mechanism to prevent performance degradation
+* Improved segmentation in challenging regions
+* Modular and reproducible pipeline
 
 ---
 
-📌 Future Work
+## ⚠️ Notes
 
-- Improve uncertainty estimation methods
-- Extend to other medical segmentation tasks
-- Optimize correction efficiency
+* Dataset is not included in this repository
+* Model weights are provided separately
+* Results may vary slightly due to stochasticity in MC Dropout
+
+---
+
+## 📌 Future Work
+
+* Improved uncertainty estimation techniques
+* Extension to other medical segmentation tasks
+* Optimization for faster inference
 
 ---
 
-👩‍💻 Authors
+## 👩‍💻 Authors
 
-- Joshitha
-- Vamsika
-
----
+* Joshitha
+* Vamsika
