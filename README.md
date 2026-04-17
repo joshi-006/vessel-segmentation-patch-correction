@@ -100,14 +100,19 @@ Pretrained FR-UNet ensemble weights are not included due to size constraints.
 
 👉 "Download Weights" (https://drive.google.com/file/d/1HT6GWupH946phBKnBLplz5KhaKGiAr_B/view?usp=sharing)
 
-After downloading:
+After downloading, place the pretrained weights in the following directory:
 
+```id="o5p4sp"
 models_weights/
 ├── FRUNet_MC_0.pth
 ├── FRUNet_MC_1.pth
 ├── FRUNet_MC_2.pth
 ├── FRUNet_MC_3.pth
-├── FRUNet_MC_4.pth
+└── FRUNet_MC_4.pth
+```
+
+These files correspond to multiple trained instances of the FR-UNet model used for inference and patch-level correction.
+
 
 ---
 
