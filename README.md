@@ -83,7 +83,7 @@ data/
 
 Pretrained FR-UNet ensemble weights are not included due to size constraints.
 
-👉 "Download Weights" (YOUR_GOOGLE_DRIVE_LINK)
+👉 "Download Weights" (https://drive.google.com/file/d/1HT6GWupH946phBKnBLplz5KhaKGiAr_B/view?usp=sharing)
 
 After downloading:
 
