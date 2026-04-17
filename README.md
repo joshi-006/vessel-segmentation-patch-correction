@@ -75,7 +75,8 @@ vessel-segmentation-patch-correction/
 ├── notebooks/                  # Demo and visualization notebooks
 └── results/                    # Generated qualitative results (MI maps, before/after, error maps)
 
-```markdown
+```
+
 ## 🛠️ Setup & Installation
 
 ### 1. Clone the Repository
