@@ -10,6 +10,14 @@ The pipeline identifies uncertain patches via Mutual Information (MI), corrects 
 
 ---
 
+## 🎥 Demo Video
+
+👉 [Click here to watch the full demo]([https://www.youtube.com/watch?v=VIDEO_ID](https://youtu.be/A_WIeB36fbA?si=Rc0X4FjbmRl1s-nu))
+
+> This demo shows uncertainty-guided patch correction improving vessel segmentation in difficult regions.
+
+---
+
 ## 🎯 Key Features
 
 - Ensemble of 5 FR-UNet models with MC Dropout for robust uncertainty estimation
