@@ -170,7 +170,7 @@ If you use this code or method in your research, please cite:
 
 ```bibtex
 @misc{joshi2026vesselpatchcorrection,
-  author = {Joshitha Namakam and Vamsika},
+  author = {Joshitha Nambakam and Vamsika},
   title  = {Vessel Segmentation with Uncertainty-Guided Patch Correction},
   year   = {2026},
   url    = {https://github.com/joshi-006/vessel-segmentation-patch-correction}
