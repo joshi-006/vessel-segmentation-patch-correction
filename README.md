@@ -12,7 +12,7 @@ The pipeline identifies uncertain patches via Mutual Information (MI), corrects 
 
 ## 🎥 Demo Video
 
-👉 [Click here to watch the full demo](https://youtu.be/A_WIeB36fbA?si=Rc0X4FjbmRl1s-nu)
+👉 [Click here to watch the full demo](https://youtu.be/A_WIeB36fbA?si=5bz7qlaYGU0nExlA)
 
 > This demo shows uncertainty-guided patch correction improving vessel segmentation in difficult regions.
 
