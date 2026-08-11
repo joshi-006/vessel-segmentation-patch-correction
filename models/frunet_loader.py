@@ -4,9 +4,8 @@ models/frunet_loader.py
 Loads the pre-trained FR-UNet MC-Dropout ensemble from disk.
 
 Requires the MIDL24 repo to be cloned locally (see main.py / config.py for
-the expected path). The FR_UNet class is imported directly from the MIDL24
-repo's own ``models/frunet.py`` at call time, working around the fact that
-this project also has a top-level ``models`` package of its own.
+the expected path). The FR_UNet class is imported directly from the cloned
+MIDL24 repo at call time.
 """
 
 import os
@@ -14,36 +13,60 @@ import sys
 import torch
 
 
+# The MIDL24 repo has been restructured upstream since this project was
+# first built against it: current clones expose the model at
+# segmentation_quality_control/models/frunet.py (a proper installable
+# package, per its pyproject.toml), but this project's docs/history assumed
+# an older top-level models/frunet.py layout. Try the current layout first,
+# fall back to the old one, so this keeps working whichever the user has
+# cloned.
+_MIDL24_FRUNET_CANDIDATES = [
+    "segmentation_quality_control.models.frunet",  # current upstream layout
+    "models.frunet",                               # older upstream layout
+]
+
+
 def _import_midl24_frunet(midl_repo_path: str):
     """
-    Import ``FR_UNet`` from the MIDL24 repo's own ``models`` package.
+    Import ``FR_UNet`` from the cloned MIDL24 repo, trying each known layout.
 
     This project also defines a top-level ``models`` package (this one), so
-    a plain ``from models.frunet import FR_UNet`` resolves to *this* package
-    instead of the MIDL24 repo as soon as ``models`` is cached in
-    sys.modules or the project root precedes the MIDL24 path on sys.path.
-    Temporarily put the MIDL24 path first and evict any cached ``models``
-    entries so the import machinery is forced to resolve ``models.frunet``
-    against the MIDL24 repo, then restore everything afterward so the rest
-    of the codebase keeps using this project's own ``models`` package.
+    a plain ``from models.frunet import FR_UNet`` (the older MIDL24 layout)
+    would resolve to *this* package instead of the MIDL24 repo as soon as
+    ``models`` is cached in sys.modules or the project root precedes the
+    MIDL24 path on sys.path. Temporarily put the MIDL24 path first and evict
+    any cached modules with a colliding top-level name so resolution is
+    forced against the MIDL24 repo, then restore everything afterward so the
+    rest of the codebase keeps using this project's own packages.
     """
+    top_level_names = {path.split(".")[0] for path in _MIDL24_FRUNET_CANDIDATES}
+
     saved_path    = list(sys.path)
     saved_modules = {name: mod for name, mod in sys.modules.items()
-                      if name == "models" or name.startswith("models.")}
+                      if name.split(".")[0] in top_level_names}
     for name in saved_modules:
         del sys.modules[name]
 
     sys.path.insert(0, os.path.abspath(midl_repo_path))
     try:
-        from models.frunet import FR_UNet
+        errors = []
+        for module_path in _MIDL24_FRUNET_CANDIDATES:
+            try:
+                mod = __import__(module_path, fromlist=["FR_UNet"])
+                return mod.FR_UNet
+            except ImportError as e:
+                errors.append(f"  {module_path}: {e}")
+        raise ImportError(
+            f"Could not import FR_UNet from the MIDL24 repo at {midl_repo_path!r}. "
+            "Tried:\n" + "\n".join(errors) +
+            "\nCheck that the repo cloned correctly and its layout hasn't changed again."
+        )
     finally:
         sys.path[:] = saved_path
         for name in list(sys.modules):
-            if name == "models" or name.startswith("models."):
+            if name.split(".")[0] in top_level_names:
                 del sys.modules[name]
         sys.modules.update(saved_modules)
-
-    return FR_UNet
 
 
 def load_models(
@@ -65,8 +88,9 @@ def load_models(
     n_models : int
         Number of ensemble members to load.
     midl_repo_path : str
-        Path to the cloned MIDL24-segmentation_quality_control repo, whose
-        ``models/frunet.py`` defines the FR_UNet architecture.
+        Path to the cloned MIDL24-segmentation_quality_control repo,
+        somewhere under which frunet.py defines the FR_UNet architecture
+        (see _MIDL24_FRUNET_CANDIDATES for the layouts tried).
 
     Returns
     -------
