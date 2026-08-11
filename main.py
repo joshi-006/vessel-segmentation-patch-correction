@@ -8,7 +8,7 @@ Imports only from the four sub-packages:
 
 SETUP (run once):
 -----------------
-1.  pip install torch torchvision timm==0.6.13 opencv-python albumentations \\
+1.  pip install torch torchvision "timm>=0.9.16" opencv-python albumentations \\
                 tqdm scikit-image numpy pandas matplotlib
 
 2.  git clone https://github.com/berenslab/MIDL24-segmentation_quality_control.git
