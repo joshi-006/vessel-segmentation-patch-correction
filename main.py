@@ -87,7 +87,9 @@ from models import (
 )
 from correction import (
     corrected_with_guard,
-    apply_corrected_patches,
+    correct_patch_live,
+    apply_live_correction,
+    apply_live_random_correction,
     select_patches_mi_only,
     select_top_patches_non_overlap,
     patch_mi_analysis,
@@ -235,18 +237,42 @@ def main():
         }
     print("MC Dropout done.")
 
-    # ── Step 7: Export patches ────────────────────────────────────────────────
+    # ── Step 6b: TTA + MC-Dropout caching for TRAIN images ────────────────────
+    # This is the fix for test-set leakage: the correction model's dataset
+    # (both its train_set and val_set halves, split below in Step 9) must be
+    # built entirely from images the model will never be evaluated on. Every
+    # other cache in this pipeline is keyed on test_images; this one is keyed
+    # on corr_train_images (drawn from TRAIN_IMG_DIR) and is never touched by
+    # anything downstream of Step 10 — the correction model, once trained,
+    # only ever sees test images through the live apply_live_correction() /
+    # corrected_with_guard() calls in Steps 13-15, not through any cache
+    # built here.
+    corr_train_images = all_train_images[:MAX_IMAGES]
+
+    train_cached_preds, train_mc_cache = {}, {}
+    for img_name in tqdm(corr_train_images, desc="TTA predictions (train set, correction data)"):
+        _, img_tensor = preprocess_image(os.path.join(TRAIN_IMG_DIR, img_name), device=device)
+        train_cached_preds[img_name] = tta_predict(models, img_tensor)
+
+    for img_name in tqdm(corr_train_images, desc="MC Dropout uncertainty (train set)"):
+        _, img_tensor   = preprocess_image(os.path.join(TRAIN_IMG_DIR, img_name), device=device)
+        preds_mc        = mc_dropout_predict(models, img_tensor, N_PASSES)
+        _, mi_map, _, _ = compute_mutual_information(preds_mc)
+        train_mc_cache[img_name] = {"mi": np.clip(mi_map, 0, None)}
+    print("Train-set MC Dropout (correction-model data) done.")
+
+    # ── Step 7: Export patches (from TRAIN images only) ───────────────────────
     shutil.rmtree(PATCH_EXPORT_DIR); shutil.rmtree(CORRECTED_DIR)
     os.makedirs(PATCH_EXPORT_DIR, exist_ok=True)
     os.makedirs(CORRECTED_DIR,    exist_ok=True)
 
-    for img_name in tqdm(test_images, desc="Exporting patches"):
-        img_rgb, _ = preprocess_image(os.path.join(TEST_IMG_DIR, img_name), device=device)
-        mi_map     = mc_cache[img_name]["mi"]
+    for img_name in tqdm(corr_train_images, desc="Exporting patches (train set)"):
+        img_rgb, _ = preprocess_image(os.path.join(TRAIN_IMG_DIR, img_name), device=device)
+        mi_map     = train_mc_cache[img_name]["mi"]
         binary_mask = morphological_postprocess(
-            (cached_preds[img_name] > BEST_THRESH).astype(np.uint8)
+            (train_cached_preds[img_name] > BEST_THRESH).astype(np.uint8)
         )
-        gt = _load_gt(img_name, TEST_IMG_DIR, TEST_MASK_DIR)
+        gt = _load_gt(img_name, TRAIN_IMG_DIR, TRAIN_MASK_DIR)
 
         _, top_candidates = select_patches_mi_only(mi_map, PATCH_SIZE, TOP_K,
                                                    mi_floor=UNCERTAINTY_THRESHOLD)
@@ -261,7 +287,7 @@ def main():
             np.save(os.path.join(PATCH_EXPORT_DIR, pname + "_gt.npy"),  gt[r:r+size, c:c+size])
 
     n_exported = len(glob.glob(os.path.join(PATCH_EXPORT_DIR, "*_img.npy")))
-    print("Exported patches:", n_exported)
+    print("Exported patches (train set):", n_exported)
 
     # ── Step 8: Load patches into arrays ─────────────────────────────────────
     img_patches, seg_patches, mi_patches, gt_patches = [], [], [], []
@@ -333,9 +359,12 @@ def main():
     correction_model.eval()
     print("Best patch correction model loaded.")
 
-    # ── Step 11: Run correction model on all exported patches ─────────────────
+    # ── Step 11: Run correction model on all exported (train-set) patches ─────
+    # QA/debug artifact only — shows what the trained model does on its own
+    # training patches. Nothing downstream reads this for test-set evaluation;
+    # Steps 13-15 apply the model live to test images instead (see Step 6b).
     for img_path in tqdm(sorted(glob.glob(os.path.join(PATCH_EXPORT_DIR, "*_img.npy"))),
-                         desc="Correcting patches"):
+                         desc="Correcting patches (train set, QA only)"):
         base    = img_path.replace("_img.npy", "")
         gt_path = base + "_gt.npy"
         if not os.path.exists(gt_path):
@@ -422,36 +451,26 @@ def main():
         img_rgb, img_tensor = preprocess_image(os.path.join(TEST_IMG_DIR, img_name), device=device)
         cache     = mc_cache[img_name]
         mi_map    = np.clip(cache["mi"], 0, 1)
-        mean_map  = cache["mean"]
         pred_prob = cached_preds[img_name]
         gt        = cached_gts[img_name]
-        base_name = os.path.splitext(img_name)[0]
 
         current_mask = morphological_postprocess(
             (pred_prob > BEST_THRESH).astype(np.uint8)
         )
         dice_before_list.append(float(np.clip(compute_metrics(current_mask, gt)["dice"], 0, 1)))
 
-        # Random baseline
-        rng_mask       = current_mask.copy()
-        all_corr_files = [f for f in os.listdir(CORRECTED_DIR)
-                          if f.startswith(base_name + "_r") and f.endswith("_corrected.npy")]
-        if all_corr_files:
-            chosen = random.sample(all_corr_files,
-                                   min(max(1, len(all_corr_files) // 2), len(all_corr_files)))
-            for fname in chosen:
-                parts = fname.replace("_corrected.npy", "").split("_")
-                r    = int(next(p[1:] for p in parts if p.startswith("r")))
-                c    = int(next(p[1:] for p in parts if p.startswith("c")))
-                size = int(next(p[1:] for p in parts if p.startswith("s")))
-                rng_mask[r:r+size, c:c+size] = np.load(
-                    os.path.join(CORRECTED_DIR, fname)).astype(np.uint8)
+        # Random baseline — live, ungated correction on randomly chosen patches
+        rng_mask = apply_live_random_correction(
+            correction_model, img_rgb, current_mask, mi_map, device,
+            PATCH_SIZE, TOP_K, best_thresh=BEST_THRESH,
+        )
         random_results.append(compute_metrics(morphological_postprocess(rng_mask), gt))
 
-        # Pass 1: MI-ranked ungated correction
-        current_mask = apply_corrected_patches(
-            current_mask, base_name, CORRECTED_DIR, mi_map, mean_map, TOP_K,
-            best_thresh=BEST_THRESH,
+        # Pass 1: MI-ranked ungated correction (live — model has never seen
+        # this test image; it was trained purely on train_images, see Step 6b)
+        current_mask = apply_live_correction(
+            correction_model, img_rgb, current_mask, mi_map, device,
+            PATCH_SIZE, TOP_K, best_thresh=BEST_THRESH,
         )
 
         # Pass 2: residual uncertain regions with safety guard
@@ -500,10 +519,11 @@ def main():
     entropy_results, variance_results = [], []
 
     for img_name in tqdm(test_images, desc="Entropy/Variance baselines"):
-        cache     = mc_cache[img_name]
-        pred_prob = cached_preds[img_name]
-        gt        = cached_gts[img_name]
-        base_name = os.path.splitext(img_name)[0]
+        cache      = mc_cache[img_name]
+        mi_map     = np.clip(cache["mi"], 0, 1)
+        pred_prob  = cached_preds[img_name]
+        gt         = cached_gts[img_name]
+        img_rgb, _ = preprocess_image(os.path.join(TEST_IMG_DIR, img_name), device=device)
 
         for unc_key, res_list in [("entropy", entropy_results), ("variance", variance_results)]:
             unc_map = cache[unc_key].copy()
@@ -513,44 +533,45 @@ def main():
             cur = morphological_postprocess(
                 (pred_prob > BEST_THRESH).astype(np.uint8)
             )
+            # unc_map (entropy/variance) only picks WHERE to correct; the
+            # model itself is still fed the MI channel it was trained on.
             patches, _ = patch_uncertainty_analysis(unc_map, PATCH_SIZE, TOP_K,
                                                      threshold=UNCERTAINTY_THRESHOLD)
             for r, c, size, _ in select_top_patches_non_overlap(patches, TOP_K):
-                pname      = f"{base_name}_r{r}_c{c}_s{size}"
-                candidates = [f for f in os.listdir(CORRECTED_DIR)
-                              if f.startswith(pname) and f.endswith("_corrected.npy")]
-                if candidates:
-                    cur[r:r+size, c:c+size] = np.load(
-                        os.path.join(CORRECTED_DIR, candidates[0])).astype(np.uint8)
+                cur[r:r+size, c:c+size] = correct_patch_live(
+                    correction_model,
+                    img_rgb[r:r+size, c:c+size],
+                    cur[r:r+size, c:c+size].astype(np.float32),
+                    mi_map[r:r+size, c:c+size],
+                    device,
+                    best_thresh=BEST_THRESH,
+                )
 
             res_list.append(compute_metrics(morphological_postprocess(cur), gt))
 
     mi_only_results = []
     for img_name in tqdm(test_images, desc="MI-only gate ablation"):
-        cache     = mc_cache[img_name]
-        mi_map    = np.clip(cache["mi"], 0, 1)
-        pred_prob = cached_preds[img_name]
-        gt        = cached_gts[img_name]
-        base_name = os.path.splitext(img_name)[0]
+        cache      = mc_cache[img_name]
+        mi_map     = np.clip(cache["mi"], 0, 1)
+        pred_prob  = cached_preds[img_name]
+        gt         = cached_gts[img_name]
+        img_rgb, _ = preprocess_image(os.path.join(TEST_IMG_DIR, img_name), device=device)
 
         cur = morphological_postprocess(
             (pred_prob > BEST_THRESH).astype(np.uint8)
         )
-        all_files = [f for f in os.listdir(CORRECTED_DIR) if f.startswith(base_name + "_r")]
-        pi = []
-        for fname in all_files:
-            parts  = fname.replace("_corrected.npy", "").split("_")
-            r      = int(next(p[1:] for p in parts if p.startswith("r")))
-            c      = int(next(p[1:] for p in parts if p.startswith("c")))
-            size   = int(next(p[1:] for p in parts if p.startswith("s")))
-            avg_mi = np.mean(np.sort(mi_map[r:r+size, c:c+size].flatten())[-10:])
-            pi.append((fname, r, c, size, avg_mi))
-
-        pi.sort(key=lambda x: x[4], reverse=True)
-        for fname, r, c, size, avg_mi in pi[:TOP_K]:
-            if avg_mi >= UNCERTAINTY_THRESHOLD:
-                cur[r:r+size, c:c+size] = np.load(
-                    os.path.join(CORRECTED_DIR, fname)).astype(np.uint8)
+        all_patches, _ = patch_mi_analysis(mi_map, PATCH_SIZE, TOP_K,
+                                           mi_floor=UNCERTAINTY_THRESHOLD)
+        top_patches = select_top_patches_non_overlap(all_patches, TOP_K)
+        for r, c, size, avg_mi in top_patches:
+            cur[r:r+size, c:c+size] = correct_patch_live(
+                correction_model,
+                img_rgb[r:r+size, c:c+size],
+                cur[r:r+size, c:c+size].astype(np.float32),
+                mi_map[r:r+size, c:c+size],
+                device,
+                best_thresh=BEST_THRESH,
+            )
 
         mi_only_results.append(compute_metrics(morphological_postprocess(cur), gt))
 
@@ -580,31 +601,26 @@ def main():
     print(f"\n4. Patch-level Dice — evaluated ONLY on corrected patch pixels")
     patch_dice_before, patch_dice_after = [], []
     for img_name in test_images:
-        cache     = mc_cache[img_name]
-        mi_map    = np.clip(cache["mi"], 0, 1)
-        mean_map  = cache["mean"]
-        pred_prob = cached_preds[img_name]
-        gt        = cached_gts[img_name]
-        base_name = os.path.splitext(img_name)[0]
+        cache      = mc_cache[img_name]
+        mi_map     = np.clip(cache["mi"], 0, 1)
+        pred_prob  = cached_preds[img_name]
+        gt         = cached_gts[img_name]
+        img_rgb, _ = preprocess_image(os.path.join(TEST_IMG_DIR, img_name), device=device)
 
         before_mask = morphological_postprocess(
             (pred_prob > BEST_THRESH).astype(np.uint8)
         )
         after_mask = morphological_postprocess(
-            apply_corrected_patches(
-                before_mask.copy(), base_name, CORRECTED_DIR,
-                mi_map, mean_map, TOP_K, best_thresh=BEST_THRESH,
+            apply_live_correction(
+                correction_model, img_rgb, before_mask.copy(), mi_map, device,
+                PATCH_SIZE, TOP_K, best_thresh=BEST_THRESH,
             )
         )
 
+        _, top_candidates = select_patches_mi_only(mi_map, PATCH_SIZE, TOP_K, mi_floor=0.02)
+        top_patches = select_top_patches_non_overlap(top_candidates, TOP_K)
         region_mask = np.zeros((512, 512), dtype=bool)
-        all_files   = [f for f in os.listdir(CORRECTED_DIR)
-                       if f.startswith(base_name + "_r") and f.endswith("_corrected.npy")]
-        for fname in all_files:
-            parts = fname.replace("_corrected.npy", "").split("_")
-            r     = int(next(p[1:] for p in parts if p.startswith("r")))
-            c     = int(next(p[1:] for p in parts if p.startswith("c")))
-            size  = int(next(p[1:] for p in parts if p.startswith("s")))
+        for r, c, size, _ in top_patches:
             region_mask[r:r+size, c:c+size] = True
 
         if region_mask.sum() == 0:
@@ -641,18 +657,17 @@ def main():
         raw = cv2.cvtColor(cv2.imread(os.path.join(TEST_IMG_DIR, img_name)), cv2.COLOR_BGR2RGB)
         raw = cv2.resize(raw, (512, 512))
 
-        mi_map    = mc_cache[img_name]["mi"]
-        mean_map  = mc_cache[img_name]["mean"]
-        gt        = cached_gts[img_name]
-        base_name = os.path.splitext(img_name)[0]
+        mi_map     = mc_cache[img_name]["mi"]
+        gt         = cached_gts[img_name]
+        img_rgb, _ = preprocess_image(os.path.join(TEST_IMG_DIR, img_name), device=device)
 
         before_mask = morphological_postprocess(
             (cached_preds[img_name] > BEST_THRESH).astype(np.uint8)
         )
         after_mask = morphological_postprocess(
-            apply_corrected_patches(
-                before_mask.copy(), base_name, CORRECTED_DIR,
-                mi_map, mean_map, TOP_K, best_thresh=BEST_THRESH,
+            apply_live_correction(
+                correction_model, img_rgb, before_mask.copy(), mi_map, device,
+                PATCH_SIZE, TOP_K, best_thresh=BEST_THRESH,
             )
         )
         corrected_masks[img_name] = after_mask
