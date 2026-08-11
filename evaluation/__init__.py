@@ -1,0 +1,33 @@
+from .metrics import (
+    compute_dice,
+    compute_iou,
+    compute_metrics,
+    failure_analysis,
+    print_failure_summary,
+    build_ablation_table,
+    print_ablation_table,
+    plot_dice_distribution,
+    plot_ablation_bar,
+    plot_adaptive_efficiency,
+    print_hard_region_analysis,
+    print_evaluation_beyond_mean_dice,
+    plot_region_improvement_scatter,
+    plot_error_maps,
+)
+
+__all__ = [
+    "compute_dice",
+    "compute_iou",
+    "compute_metrics",
+    "failure_analysis",
+    "print_failure_summary",
+    "build_ablation_table",
+    "print_ablation_table",
+    "plot_dice_distribution",
+    "plot_ablation_bar",
+    "plot_adaptive_efficiency",
+    "print_hard_region_analysis",
+    "print_evaluation_beyond_mean_dice",
+    "plot_region_improvement_scatter",
+    "plot_error_maps",
+]
