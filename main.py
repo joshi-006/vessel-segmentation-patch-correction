@@ -74,6 +74,7 @@ DELTA_THRESHOLD       = 0.002
 MIN_PATCHES           = 1
 
 EPOCHS                = 50
+SEED                  = 42
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Local package imports  (after sys.path.append above)
@@ -139,6 +140,9 @@ def _load_gt(img_name: str, img_dir: str, mask_dir: str) -> np.ndarray:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def main():
+    torch.manual_seed(SEED)
+    torch.cuda.manual_seed_all(SEED)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device:", device)
     print(f"TOP_K={TOP_K}  N_PASSES={N_PASSES}  SAFE_UPDATE_MARGIN={SAFE_UPDATE_MARGIN}  "
