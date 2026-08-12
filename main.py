@@ -149,7 +149,7 @@ def main():
     print("Device:", device)
     print(f"TOP_K={TOP_K}  N_PASSES={N_PASSES}  SAFE_UPDATE_MARGIN={SAFE_UPDATE_MARGIN}  "
           f"MI_HIGH_THRESHOLD={MI_HIGH_THRESHOLD}  MIN_CONF_CHANGE={MIN_CONF_CHANGE}")
-    print("Pass 1: UNGATED (aggressive).  Pass 2: GATED by corrected_with_guard().")
+    print("Pass 1 and Pass 2 both gated by the safe-update rule (corrected_with_guard).")
 
     for d in [OUTPUT_DIR, PATCH_EXPORT_DIR, CORRECTED_DIR]:
         os.makedirs(d, exist_ok=True)
@@ -451,6 +451,7 @@ def main():
         img_rgb, img_tensor = preprocess_image(os.path.join(TEST_IMG_DIR, img_name), device=device)
         cache     = mc_cache[img_name]
         mi_map    = np.clip(cache["mi"], 0, 1)
+        mean_map  = cache["mean"]
         pred_prob = cached_preds[img_name]
         gt        = cached_gts[img_name]
 
@@ -460,16 +461,18 @@ def main():
         dice_before_list.append(float(np.clip(compute_metrics(current_mask, gt)["dice"], 0, 1)))
 
         # Random baseline — live, ungated correction on randomly chosen patches
+        # (stays ungated on purpose — see apply_live_correction()'s docstring)
         rng_mask = apply_live_random_correction(
             correction_model, img_rgb, current_mask, mi_map, device,
             PATCH_SIZE, TOP_K, best_thresh=BEST_THRESH,
         )
         random_results.append(compute_metrics(morphological_postprocess(rng_mask), gt))
 
-        # Pass 1: MI-ranked ungated correction (live — model has never seen
-        # this test image; it was trained purely on train_images, see Step 6b)
+        # Pass 1: MI-ranked correction, gated by the safe-update rule (live —
+        # model has never seen this test image; it was trained purely on
+        # train_images, see Step 6b)
         current_mask = apply_live_correction(
-            correction_model, img_rgb, current_mask, mi_map, device,
+            correction_model, img_rgb, current_mask, mi_map, mean_map, device,
             PATCH_SIZE, TOP_K, best_thresh=BEST_THRESH,
         )
 
@@ -603,6 +606,7 @@ def main():
     for img_name in test_images:
         cache      = mc_cache[img_name]
         mi_map     = np.clip(cache["mi"], 0, 1)
+        mean_map   = cache["mean"]
         pred_prob  = cached_preds[img_name]
         gt         = cached_gts[img_name]
         img_rgb, _ = preprocess_image(os.path.join(TEST_IMG_DIR, img_name), device=device)
@@ -612,7 +616,7 @@ def main():
         )
         after_mask = morphological_postprocess(
             apply_live_correction(
-                correction_model, img_rgb, before_mask.copy(), mi_map, device,
+                correction_model, img_rgb, before_mask.copy(), mi_map, mean_map, device,
                 PATCH_SIZE, TOP_K, best_thresh=BEST_THRESH,
             )
         )
@@ -658,6 +662,7 @@ def main():
         raw = cv2.resize(raw, (512, 512))
 
         mi_map     = mc_cache[img_name]["mi"]
+        mean_map   = mc_cache[img_name]["mean"]
         gt         = cached_gts[img_name]
         img_rgb, _ = preprocess_image(os.path.join(TEST_IMG_DIR, img_name), device=device)
 
@@ -666,7 +671,7 @@ def main():
         )
         after_mask = morphological_postprocess(
             apply_live_correction(
-                correction_model, img_rgb, before_mask.copy(), mi_map, device,
+                correction_model, img_rgb, before_mask.copy(), mi_map, mean_map, device,
                 PATCH_SIZE, TOP_K, best_thresh=BEST_THRESH,
             )
         )

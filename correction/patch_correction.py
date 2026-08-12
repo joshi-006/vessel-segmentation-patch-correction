@@ -66,7 +66,8 @@ def corrected_with_guard(
     correction_model : nn.Module
         Trained PatchCorrectionUNet (eval mode).
     img_rgb : np.ndarray
-        Raw image crop, shape (H, W, 3), uint8 or float.
+        Image crop already normalised to [-1, 1] (straight from
+        preprocess_image), shape (H, W, 3).
     seg_patch : np.ndarray
         Current binary segmentation crop, shape (H, W).
     mi_patch : np.ndarray
@@ -88,7 +89,12 @@ def corrected_with_guard(
     accepted  : bool        – True if the safe-update gate passed
     """
     # ── Build input tensor ────────────────────────────────────────────────────
-    img_p = ((img_rgb / 255.0 - 0.5) / 0.5).transpose(2, 0, 1)
+    # img_rgb is already normalised to [-1,1] by preprocess_image — do NOT
+    # re-normalise. (This used to divide by 255 again here, crushing the
+    # already-normalised signal to near-zero before it ever reached the
+    # model — the same double-normalisation bug that was caught and fixed
+    # in the patch-export step, but never fixed here.)
+    img_p = img_rgb.transpose(2, 0, 1)
     x = torch.from_numpy(
         np.concatenate([img_p, seg_patch[np.newaxis], mi_patch[np.newaxis]], axis=0)
     ).float().unsqueeze(0).to(device)
@@ -169,33 +175,48 @@ def apply_live_correction(
     img_rgb: np.ndarray,
     mask: np.ndarray,
     mi_map: np.ndarray,
+    mean_map: np.ndarray,
     device: torch.device,
     patch_size: int,
     top_k: int,
     best_thresh: float = 0.5,
     mi_floor: float = 0.02,
+    safe_update_margin: float = SAFE_UPDATE_MARGIN,
+    min_conf_change: float = MIN_CONF_CHANGE,
 ) -> np.ndarray:
     """
-    Pass-1-style ungated correction: select the top-K MI-ranked,
-    non-overlapping patches and splice in the trained model's live
-    correction for each. Direct replacement for apply_corrected_patches()
-    that needs no on-disk cache, so it works for images the model has
-    never seen (e.g. the test set) without any filename bookkeeping.
+    Pass-1-style correction: select the top-K MI-ranked, non-overlapping
+    patches and splice in the trained model's correction for each, gated
+    by the same safe-update rule as Pass 2 (corrected_with_guard) — a
+    correction is only kept if it actually improves confidence and reduces
+    uncertainty.
+
+    This used to be ungated ("aggressive" Pass 1, no acceptance check at
+    all). A real leak-free run showed that made things catastrophically
+    worse specifically on hard, high-uncertainty images — exactly the
+    ones an unchecked correction is riskiest on. Gating it the same way
+    Pass 2 already was closes that gap; D/E/F/G in the ablation study
+    stay ungated on purpose, so the table still shows what gating buys you
+    (G vs H).
     """
     _, candidates = select_patches_mi_only(mi_map, patch_size, top_k, mi_floor=mi_floor)
     top_patches = select_top_patches_non_overlap(candidates, top_k)
 
     new_mask = mask.copy()
     for r, c, size, _ in top_patches:
-        corr = correct_patch_live(
+        corr, _, accepted = corrected_with_guard(
             correction_model,
             img_rgb[r:r+size, c:c+size],
             new_mask[r:r+size, c:c+size].astype(np.float32),
             np.clip(mi_map[r:r+size, c:c+size], 0, 1),
+            mean_map[r:r+size, c:c+size],
             device,
-            best_thresh=best_thresh,
+            threshold=best_thresh,
+            safe_update_margin=safe_update_margin,
+            min_conf_change=min_conf_change,
         )
-        new_mask[r:r+size, c:c+size] = corr
+        if accepted:
+            new_mask[r:r+size, c:c+size] = corr
 
     return new_mask
 
