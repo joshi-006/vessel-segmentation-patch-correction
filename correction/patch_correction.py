@@ -7,9 +7,6 @@ no training, no evaluation metrics, no plotting.
 Public API
 ----------
 corrected_with_guard()
-correct_patch_live()
-apply_live_correction()
-apply_live_random_correction()
 apply_corrected_patches()
 select_patches_mi_only()
 select_top_patches_non_overlap()
@@ -25,7 +22,6 @@ adaptive_refinement_stopping()
 from __future__ import annotations
 
 import os
-import random
 
 import numpy as np
 import torch
@@ -66,8 +62,7 @@ def corrected_with_guard(
     correction_model : nn.Module
         Trained PatchCorrectionUNet (eval mode).
     img_rgb : np.ndarray
-        Image crop already normalised to [-1, 1] (straight from
-        preprocess_image), shape (H, W, 3).
+        Raw image crop, shape (H, W, 3), uint8 or float.
     seg_patch : np.ndarray
         Current binary segmentation crop, shape (H, W).
     mi_patch : np.ndarray
@@ -89,12 +84,7 @@ def corrected_with_guard(
     accepted  : bool        – True if the safe-update gate passed
     """
     # ── Build input tensor ────────────────────────────────────────────────────
-    # img_rgb is already normalised to [-1,1] by preprocess_image — do NOT
-    # re-normalise. (This used to divide by 255 again here, crushing the
-    # already-normalised signal to near-zero before it ever reached the
-    # model — the same double-normalisation bug that was caught and fixed
-    # in the patch-export step, but never fixed here.)
-    img_p = img_rgb.transpose(2, 0, 1)
+    img_p = ((img_rgb / 255.0 - 0.5) / 0.5).transpose(2, 0, 1)
     x = torch.from_numpy(
         np.concatenate([img_p, seg_patch[np.newaxis], mi_patch[np.newaxis]], axis=0)
     ).float().unsqueeze(0).to(device)
@@ -134,134 +124,6 @@ def corrected_with_guard(
     accepted  = new_score > old_score + safe_update_margin
 
     return new_mask, new_prob, accepted
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 1b. Live (ungated) correction — the leak-free replacement for looking up
-#     pre-cached corrected patches by filename. The correction model is
-#     already trained by the time these run; they just apply it on the fly
-#     to whichever image (typically a held-out test image) is passed in, the
-#     same way corrected_with_guard() already does for Pass 2 — just without
-#     the safe-update gate, matching Pass 1's original "ungated aggressive"
-#     behaviour.
-# ─────────────────────────────────────────────────────────────────────────────
-
-def correct_patch_live(
-    correction_model,
-    img_rgb_patch: np.ndarray,
-    seg_patch: np.ndarray,
-    mi_patch: np.ndarray,
-    device: torch.device,
-    best_thresh: float = 0.5,
-) -> np.ndarray:
-    """
-    Run the trained correction model on a single patch and return the
-    binarised corrected mask. No safe-update gating — the caller decides
-    whether/where to apply it.
-    """
-    img_p = img_rgb_patch.transpose(2, 0, 1)
-    x = torch.from_numpy(
-        np.concatenate([img_p, seg_patch[np.newaxis], mi_patch[np.newaxis]], axis=0)
-    ).float().unsqueeze(0).to(device)
-
-    with torch.no_grad():
-        new_prob = torch.sigmoid(correction_model(x)).squeeze().cpu().numpy()
-
-    return (new_prob > best_thresh).astype(np.uint8)
-
-
-def apply_live_correction(
-    correction_model,
-    img_rgb: np.ndarray,
-    mask: np.ndarray,
-    mi_map: np.ndarray,
-    mean_map: np.ndarray,
-    device: torch.device,
-    patch_size: int,
-    top_k: int,
-    best_thresh: float = 0.5,
-    mi_floor: float = 0.02,
-    safe_update_margin: float = SAFE_UPDATE_MARGIN,
-    min_conf_change: float = MIN_CONF_CHANGE,
-) -> np.ndarray:
-    """
-    Pass-1-style correction: select the top-K MI-ranked, non-overlapping
-    patches and splice in the trained model's correction for each, gated
-    by the same safe-update rule as Pass 2 (corrected_with_guard) — a
-    correction is only kept if it actually improves confidence and reduces
-    uncertainty.
-
-    This used to be ungated ("aggressive" Pass 1, no acceptance check at
-    all). A real leak-free run showed that made things catastrophically
-    worse specifically on hard, high-uncertainty images — exactly the
-    ones an unchecked correction is riskiest on. Gating it the same way
-    Pass 2 already was closes that gap; D/E/F/G in the ablation study
-    stay ungated on purpose, so the table still shows what gating buys you
-    (G vs H).
-    """
-    _, candidates = select_patches_mi_only(mi_map, patch_size, top_k, mi_floor=mi_floor)
-    top_patches = select_top_patches_non_overlap(candidates, top_k)
-
-    new_mask = mask.copy()
-    for r, c, size, _ in top_patches:
-        corr, _, accepted = corrected_with_guard(
-            correction_model,
-            img_rgb[r:r+size, c:c+size],
-            new_mask[r:r+size, c:c+size].astype(np.float32),
-            np.clip(mi_map[r:r+size, c:c+size], 0, 1),
-            mean_map[r:r+size, c:c+size],
-            device,
-            threshold=best_thresh,
-            safe_update_margin=safe_update_margin,
-            min_conf_change=min_conf_change,
-        )
-        if accepted:
-            new_mask[r:r+size, c:c+size] = corr
-
-    return new_mask
-
-
-def apply_live_random_correction(
-    correction_model,
-    img_rgb: np.ndarray,
-    mask: np.ndarray,
-    mi_map: np.ndarray,
-    device: torch.device,
-    patch_size: int,
-    top_k: int,
-    best_thresh: float = 0.5,
-    rng: random.Random | None = None,
-) -> np.ndarray:
-    """
-    Random-selection baseline: corrects up to top_k // 2 randomly chosen,
-    non-overlapping grid patches (regardless of MI score) with the same
-    live model, for comparison against MI-guided selection. Mirrors the
-    original random-correction baseline's ~50%-of-candidates sampling.
-    """
-    rng = rng or random
-
-    all_patches, _ = patch_mi_analysis(mi_map, patch_size, top_k, mi_floor=0.0)
-    if not all_patches:
-        return mask.copy()
-
-    n_pick = max(1, len(all_patches) // 2)
-    shuffled = all_patches.copy()
-    rng.shuffle(shuffled)
-    chosen = select_top_patches_non_overlap(shuffled, min(n_pick, top_k))
-
-    new_mask = mask.copy()
-    for r, c, size, _ in chosen:
-        corr = correct_patch_live(
-            correction_model,
-            img_rgb[r:r+size, c:c+size],
-            new_mask[r:r+size, c:c+size].astype(np.float32),
-            np.clip(mi_map[r:r+size, c:c+size], 0, 1),
-            device,
-            best_thresh=best_thresh,
-        )
-        new_mask[r:r+size, c:c+size] = corr
-
-    return new_mask
 
 
 # ─────────────────────────────────────────────────────────────────────────────
